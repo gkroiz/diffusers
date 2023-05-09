@@ -45,6 +45,8 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
+import torch_xla.core.xla_model as xm
+
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.17.0.dev0")
@@ -778,11 +780,14 @@ def main():
                 pipeline.set_progress_bar_config(disable=True)
 
                 # run inference
-                generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                if args.seed is not None:
+                    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                else:
+                    generator = None
                 images = []
                 for _ in range(args.num_validation_images):
                     images.append(
-                        pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                        pipeline(args.validation_prompt, num_inference_steps=30, generator=generator, callback=lambda *_: xm.mark_step()).images[0]
                     )
 
                 for tracker in accelerator.trackers:
@@ -800,7 +805,7 @@ def main():
                         )
 
                 del pipeline
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
 
     # Save the lora layers
     accelerator.wait_for_everyone()
@@ -834,10 +839,13 @@ def main():
     pipeline.unet.load_attn_procs(args.output_dir)
 
     # run inference
-    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+    if args.seed is not None:
+        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+    else:
+        generator = None
     images = []
     for _ in range(args.num_validation_images):
-        images.append(pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0])
+        images.append(pipeline(args.validation_prompt, num_inference_steps=30, generator=generator, callback=lambda *_: xm.mark_step()).images[0])
 
     if accelerator.is_main_process:
         for tracker in accelerator.trackers:
